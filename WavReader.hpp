@@ -31,7 +31,8 @@ struct WavHeader {
 
 class Wav {
   WavHeader header;
-  // data
+  float *l_data;
+  float *r_data;
   char *filename;
 
 public:
@@ -44,6 +45,7 @@ public:
 private:
   void readBytes(ifstream &file, char *buffer, int size);
   int readHeader(ifstream &file);
+  void readData(ifstream &file);
 };
 
 #endif
