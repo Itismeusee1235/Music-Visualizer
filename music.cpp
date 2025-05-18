@@ -8,7 +8,12 @@ int main() {
     return -1;
   }
 
-  bool quit = false;
+  SDL_AudioSpec wanted, have;
+  SDL_AudioDeviceID device = NULL;
+  SDL_memset(&wanted, 0, sizeof...(wanted));
+  ee
+
+      bool quit = false;
   while (!quit) {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
