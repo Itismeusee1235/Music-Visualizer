@@ -44,20 +44,39 @@ void FFT(cF *time, cF *freq, int N) {
   }
 }
 
-int main() {
-
-  cF *time = new cF[4];
-  time[0] = cF(1, 0);
-  time[1] = cF(0, 0);
-  time[2] = cF(0, 0);
-  time[3] = cF(0, 0);
-
-  cF *freq = new cF[4];
-  FFT(time, freq, 4);
-
-  for (int i = 0; i < 4; i++) {
-    cout << freq[i] << endl;
+void convertFtoCF(cF *out, float *in, int size) {
+  for (int i = 0; i < size; i++) {
+    out[i] = cF(in[i], 0);
   }
-
-  return 0;
 }
+void convertCFtoF(cF *out, float *in, int size) {
+  for (int i = 0; i < size; i++) {
+    in[i] = abs(out[i]);
+  }
+}
+
+void fourier(float *time, float *freq, int N) {
+  cF *cTime = new cF[N];
+  cF *cFreq = new cF[N];
+  convertFtoCF(cTime, time, N);
+  FFT(cTime, cFreq, N);
+  convertCFtoF(cFreq, freq, N);
+}
+
+// int main() {
+//
+//   cF *time = new cF[4];
+//   time[0] = cF(1, 0);
+//   time[1] = cF(0, 0);
+//   time[2] = cF(0, 0);
+//   time[3] = cF(0, 0);
+//
+//   cF *freq = new cF[4];
+//   FFT(time, freq, 4);
+//
+//   for (int i = 0; i < 4; i++) {
+//     cout << freq[i] << endl;
+//   }
+//
+//   return 0;
+// }

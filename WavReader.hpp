@@ -31,15 +31,21 @@ struct WavHeader {
 
 class Wav {
   WavHeader header;
+  int numFrames;
   float *l_data;
   float *r_data;
-  char *filename;
 
 public:
+  Wav();
   Wav(char *filename);
+  Wav(const Wav &other); // copy constructor
   void print();
   int getSize();
+  WavHeader getHeader();
+  int getFrames();
+  void getData(float *&l_data, float *&r_data);
   float getDuration();
+  Wav &operator=(const Wav &other);
   ~Wav();
 
 private:

@@ -5,11 +5,22 @@
 #include <string.h>
 using namespace std;
 
+Wav::Wav() : l_data(nullptr), r_data(nullptr), numFrames(0) {}
+
 Wav::Wav(char *filename) {
   ifstream file(filename, ios::in | ios::binary);
   readHeader(file);
   readData(file);
   file.close();
+}
+Wav::Wav(const Wav &other) {
+  header = other.header;
+  numFrames = other.numFrames;
+  l_data = new float[numFrames];
+  r_data = new float[numFrames];
+
+  memcpy(l_data, other.l_data, numFrames * sizeof(float));
+  memcpy(r_data, other.r_data, numFrames * sizeof(float));
 }
 
 void Wav::readBytes(ifstream &file, char *buffer, int size) {
@@ -51,6 +62,8 @@ void Wav::readData(ifstream &file) {
   l_data = new float[num_frames];
   r_data = new float[num_frames];
 
+  numFrames = num_frames;
+
   int num_bytes = header.bitsPerSample / 8;
   if (num_bytes == 2) {
     cout << "2 bytes" << endl;
@@ -72,6 +85,35 @@ void Wav::readData(ifstream &file) {
   } else {
     printf("Exceeded bit depth");
   }
+}
+
+WavHeader Wav::getHeader() { return header; }
+
+void Wav::getData(float *&l_data, float *&r_data) {
+  l_data = new float[numFrames];
+  r_data = new float[numFrames];
+  memcpy(l_data, this->l_data, numFrames * sizeof(float));
+  memcpy(r_data, this->r_data, numFrames * sizeof(float));
+}
+
+int Wav::getFrames() { return numFrames; }
+
+Wav &Wav::operator=(const Wav &other) {
+  if (this == &other) {
+    return *this;
+  }
+
+  delete[] l_data;
+  delete[] r_data;
+
+  header = other.header;
+  numFrames = other.numFrames;
+  l_data = new float[numFrames];
+  r_data = new float[numFrames];
+
+  memcpy(l_data, other.l_data, numFrames * sizeof(float));
+  memcpy(r_data, other.r_data, numFrames * sizeof(float));
+  return *this;
 }
 
 void Wav::print() {
@@ -108,7 +150,6 @@ float Wav::getDuration() {
 }
 
 Wav::~Wav() {
-
-  free(l_data);
-  free(r_data);
+  delete[] l_data;
+  delete[] r_data;
 }
