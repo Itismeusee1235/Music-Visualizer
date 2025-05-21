@@ -3,13 +3,67 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_audio.h>
 
-typedef struct {
+struct buf {
+  float *data;
+  int front;
+  int back;
+  int size;
+  int count;
+
+  buf(int n) {
+    size = n;
+    data = new float[n];
+    front = 0;
+    back = 0;
+  };
+
+  ~buf() { delete[] data; };
+
+  void put(float value) {
+    data[back] = value;
+    back = (back + 1) % size;
+    if (size == count) {
+      front = (front + 1) % size;
+    } else {
+      count++;
+    }
+  };
+
+  int pull(float &value) {
+    if (count <= 0) {
+      return -1;
+    }
+    value = data[front];
+    front = (front + 1) % size;
+    count--;
+    return 0;
+  };
+
+  void getRecent(int n) {
+    count += n;
+    front = ((size + back) - n) % size;
+  }
+};
+
+struct udata {
   float *l_data;
   float *r_data;
-  float *amp;
+  buf l_buf;
+  buf r_buf;
   int index;
   int totalFrames;
-} udata;
+
+  udata(int n, int buf_size, int s) : l_buf(buf_size), r_buf(buf_size) {
+    totalFrames = n;
+    index = 0;
+    l_data = new float[s];
+    r_data = new float[s];
+  };
+  ~udata() {
+    delete[] l_data;
+    delete[] r_data;
+  }
+};
 
 void callback(void *userdata, Uint8 *stream, int len) {
   udata *info = (udata *)userdata;
@@ -20,28 +74,32 @@ void callback(void *userdata, Uint8 *stream, int len) {
     for (int i = 0; i < num_frames; i++) {
       buf[2 * i] = 0;
       buf[2 * i + 1] = 0;
-      info->amp[i] = (buf[2 * i] + buf[2 * i + 1]) / 2;
+      info->l_buf.put(0);
+      info->r_buf.put(0);
     }
-    // put noise
   } else {
-
     for (int i = 0; i < num_frames; i++) {
-      buf[2 * i] = info->l_data[info->index];
-      buf[2 * i + 1] = info->r_data[info->index];
+      float l = info->l_data[info->index];
+      float r = info->r_data[info->index];
+      buf[2 * i] = l;
+      buf[2 * i + 1] = r;
       info->index++;
-      info->amp[i] = (buf[2 * i] + buf[2 * i + 1]) / 2;
+      info->l_buf.put(l);
+      info->r_buf.put(r);
     }
   }
 }
 
 int main() {
+
   Wav wav("output.wav");
   WavHeader head = wav.getHeader();
-  udata userdata;
-  userdata.index = 0;
-  userdata.totalFrames = wav.getFrames();
-  userdata.amp = new float[512];
-  float *freq = new float[512];
+
+  udata userdata(wav.getFrames(), 1024, 1024);
+
+  float *l_freq = new float[1024];
+  float *r_freq = new float[1024];
+
   wav.getData(userdata.l_data, userdata.r_data);
 
   if (SDL_Init(SDL_INIT_EVERYTHING)) {
@@ -54,7 +112,7 @@ int main() {
   SDL_memset(&wanted, 0, sizeof(wanted));
 
   wanted.format = AUDIO_F32SYS;
-  wanted.samples = 512;
+  wanted.samples = 2048;
   wanted.channels = head.numChannels;
   wanted.freq = head.sampleRate;
   wanted.callback = callback;
@@ -76,10 +134,10 @@ int main() {
 
   bool quit = false;
   bool on = true;
-  int scale = 20;
+  int scale = 80;
 
   while (!quit) {
-    printf("%d\n", scale);
+    // printf("%d\n", scale);
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT) {
@@ -104,20 +162,83 @@ int main() {
       }
     }
 
+    SDL_SetRenderDrawBlendMode(rend, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(rend, 0x0, 0x0, 0x0, 0xff);
     SDL_RenderClear(rend);
     SDL_SetRenderDrawColor(rend, 0xFF, 0xFF, 0xFF, 0xff);
-    fourier(userdata.amp, freq, 512);
-    for (int i = 0; i < 256; i++) {
-      // float height = freq[i] * scale;
-      // rect.h = log(height);
-      float height = log10(freq[i] + 1) * scale;
+
+    cF *l_time = new cF[1024];
+    cF *r_time = new cF[1024];
+
+    for (int i = 0; i < 1024; i++) {
+      float l, r;
+      if (userdata.l_buf.pull(l) != 0) {
+        userdata.l_buf.getRecent(1024);
+        userdata.l_buf.pull(l);
+      }
+      if (userdata.r_buf.pull(r) != 0) {
+
+        userdata.r_buf.getRecent(1024);
+        userdata.r_buf.pull(r);
+      }
+
+      l_time[i] = cF{l, 0};
+      r_time[i] = cF{r, 0};
+    }
+
+    cF *l_Freq = new cF[1024];
+    cF *r_Freq = new cF[1024];
+
+    FFT(l_time, l_Freq, 1024);
+    FFT(r_time, r_Freq, 1024);
+
+    convertCFtoF(l_Freq, l_freq, 1024);
+    convertCFtoF(r_Freq, r_freq, 1024);
+
+    for (int i = 0; i < 256; i += 1) {
+
+      float height = log10(l_freq[2 * i] + l_freq[2 * i + 1] + 1) * scale;
       rect.h = height;
+
       rect.x = i * 2 + 44;
-      rect.y = 300 - (rect.h / 2);
+      rect.y = 150 - (rect.h) / 2;
+
+      int r = 0, g = 0, b = 0;
+
+      if (i < 86) {
+        float t = i / 85.0f;
+        r = 255;
+        g = t * 255;
+        b = 0;
+      } else if (i < 171) {
+        float t = (i - 85) / 85.0f;
+        r = (1.0f - t) * 255;
+        g = 255;
+        b = 0;
+      } else {
+        float t = (i - 170) / 85.0f;
+        r = 0;
+        g = (1.0f - t) * 255;
+        b = t * 255;
+      }
+
+      SDL_SetRenderDrawColor(rend, r, g, b, 0xff);
+      // SDL_SetRenderDrawColor(rend, 0xFF, 0, 0, 0x7F);
+      SDL_RenderFillRect(rend, &rect);
+
+      height = log10(r_freq[2 * i] + r_freq[2 * i + 1] + 1) * scale;
+      rect.h = height;
+
+      rect.x = i * 2 + 44;
+      rect.y = 450 - (rect.h) / 2;
+
+      // SDL_SetRenderDrawColor(rend, 0, 0xFF, 0, 0x7F);
       SDL_RenderFillRect(rend, &rect);
     }
     SDL_RenderPresent(rend);
+
+    userdata.l_buf.getRecent(512);
+    userdata.r_buf.getRecent(512);
   }
 
   SDL_Quit();
