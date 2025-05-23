@@ -7,6 +7,7 @@ typedef struct {
   int front;
   int back;
   int count;
+  int max_count;
 } circular_buf;
 
 void put(circular_buf &buf, int value) {
@@ -18,6 +19,7 @@ void put(circular_buf &buf, int value) {
   } else {
     buf.count++;
   }
+  buf.max_count = max(buf.count, buf.max_count);
 }
 int pull(circular_buf &buf, int &value) {
   if (buf.count == 0) {
@@ -36,6 +38,19 @@ void print(circular_buf &buf) {
   }
   cout << "-f: " << buf.front << " -b: " << buf.back << " -s: " << buf.size
        << " -c: " << buf.count << endl;
+}
+
+void getRecent(circular_buf &buf, int n) {
+  if (n > buf.max_count) {
+    n = buf.max_count;
+  }
+
+  if (buf.front >= n) {
+    buf.front -= n;
+  } else {
+    buf.front = (buf.size - (n - buf.front));
+  }
+  buf.count += n;
 }
 
 int main() {
@@ -65,6 +80,12 @@ int main() {
       } else {
         cout << "empty" << endl;
       }
+      break;
+    }
+    case 'r': {
+      int num;
+      cin >> num;
+      getRecent(buf, num);
       break;
     }
     }

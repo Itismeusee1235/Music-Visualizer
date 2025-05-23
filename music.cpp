@@ -15,6 +15,7 @@ struct buf {
     data = new float[n];
     front = 0;
     back = 0;
+    count = 0;
   };
 
   ~buf() { delete[] data; };
@@ -27,6 +28,7 @@ struct buf {
     } else {
       count++;
     }
+    // cout << "Input" << count << endl;
   };
 
   int pull(float &value) {
@@ -36,13 +38,28 @@ struct buf {
     value = data[front];
     front = (front + 1) % size;
     count--;
+    // cout << "Output" << count << endl;
     return 0;
   };
 
   void getRecent(int n) {
+
+    if (front >= n) {
+      front -= n;
+    } else {
+      front = (size - (n - front));
+    }
     count += n;
-    front = ((size + back) - n) % size;
-  }
+  };
+
+  void printFront() { cout << front << endl; };
+
+  bool hasData(int n) {
+    if (n <= count) {
+      return true;
+    }
+    return false;
+  };
 };
 
 struct udata {
@@ -79,6 +96,7 @@ void callback(void *userdata, Uint8 *stream, int len) {
     }
   } else {
     for (int i = 0; i < num_frames; i++) {
+      // cout << "Adding Data" << endl;
       float l = info->l_data[info->index];
       float r = info->r_data[info->index];
       buf[2 * i] = l;
@@ -95,10 +113,12 @@ int main() {
   Wav wav("output.wav");
   WavHeader head = wav.getHeader();
 
-  udata userdata(wav.getFrames(), 1024, 1024);
+  int fftSize = 1024;
 
-  float *l_freq = new float[1024];
-  float *r_freq = new float[1024];
+  udata userdata(wav.getFrames(), 2 * fftSize, 1024);
+
+  float *l_freq = new float[fftSize];
+  float *r_freq = new float[fftSize];
 
   wav.getData(userdata.l_data, userdata.r_data);
 
@@ -136,6 +156,12 @@ int main() {
   bool on = true;
   int scale = 80;
 
+  cF *l_time = new cF[fftSize];
+  cF *r_time = new cF[fftSize];
+
+  cF *l_Freq = new cF[fftSize];
+  cF *r_Freq = new cF[fftSize];
+
   while (!quit) {
     // printf("%d\n", scale);
     SDL_Event ev;
@@ -167,33 +193,26 @@ int main() {
     SDL_RenderClear(rend);
     SDL_SetRenderDrawColor(rend, 0xFF, 0xFF, 0xFF, 0xff);
 
-    cF *l_time = new cF[1024];
-    cF *r_time = new cF[1024];
+    cout << "r ";
+    userdata.r_buf.printFront();
 
-    for (int i = 0; i < 1024; i++) {
-      float l, r;
-      if (userdata.l_buf.pull(l) != 0) {
-        userdata.l_buf.getRecent(1024);
-        userdata.l_buf.pull(l);
+    if (userdata.l_buf.hasData(fftSize) && userdata.r_buf.hasData(fftSize)) {
+      for (int i = 0; i < fftSize; i++) {
+        float l, r;
+
+        l_time[i] = cF{l, 0};
+        r_time[i] = cF{r, 0};
       }
-      if (userdata.r_buf.pull(r) != 0) {
-
-        userdata.r_buf.getRecent(1024);
-        userdata.r_buf.pull(r);
-      }
-
-      l_time[i] = cF{l, 0};
-      r_time[i] = cF{r, 0};
+    } else {
+      cout << "Not enough data" << endl;
+      // SDL_Delay(100);
     }
 
-    cF *l_Freq = new cF[1024];
-    cF *r_Freq = new cF[1024];
+    FFT(l_time, l_Freq, fftSize);
+    FFT(r_time, r_Freq, fftSize);
 
-    FFT(l_time, l_Freq, 1024);
-    FFT(r_time, r_Freq, 1024);
-
-    convertCFtoF(l_Freq, l_freq, 1024);
-    convertCFtoF(r_Freq, r_freq, 1024);
+    convertCFtoF(l_Freq, l_freq, fftSize);
+    convertCFtoF(r_Freq, r_freq, fftSize);
 
     for (int i = 0; i < 256; i += 1) {
 
@@ -236,9 +255,6 @@ int main() {
       SDL_RenderFillRect(rend, &rect);
     }
     SDL_RenderPresent(rend);
-
-    userdata.l_buf.getRecent(512);
-    userdata.r_buf.getRecent(512);
   }
 
   SDL_Quit();
