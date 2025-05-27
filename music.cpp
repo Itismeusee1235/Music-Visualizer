@@ -3,6 +3,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_audio.h>
 
+float const FRAME_RATE = 60;
+
 struct buf {
   float *data;
   int front;
@@ -117,8 +119,8 @@ int main() {
 
   udata userdata(wav.getFrames(), 2 * fftSize, 1024);
 
-  float *l_freq = new float[fftSize];
-  float *r_freq = new float[fftSize];
+  float *l_freq = new float[fftSize * 2];
+  float *r_freq = new float[fftSize * 2];
 
   wav.getData(userdata.l_data, userdata.r_data);
 
@@ -156,13 +158,19 @@ int main() {
   bool on = true;
   int scale = 80;
 
-  cF *l_time = new cF[fftSize];
-  cF *r_time = new cF[fftSize];
+  cF *l_time = new cF[fftSize * 2];
+  cF *r_time = new cF[fftSize * 2];
 
-  cF *l_Freq = new cF[fftSize];
-  cF *r_Freq = new cF[fftSize];
+  cF *l_Freq = new cF[fftSize * 2];
+  cF *r_Freq = new cF[fftSize * 2];
+
+  float previous_time = SDL_GetTicks();
+  float current_time = 0;
+
+  int start_index = 0;
 
   while (!quit) {
+
     // printf("%d\n", scale);
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
@@ -184,6 +192,12 @@ int main() {
           scale += 1;
         } else if (ev.key.keysym.sym == SDLK_DOWN) {
           scale -= 1;
+        } else if (ev.key.keysym.sym == SDLK_RIGHT) {
+          start_index += 1;
+          start_index = min(start_index, fftSize / 2 - 256);
+        } else if (ev.key.keysym.sym == SDLK_LEFT) {
+          start_index -= 1;
+          start_index = max(start_index, 0);
         }
       }
     }
@@ -197,11 +211,18 @@ int main() {
     userdata.r_buf.printFront();
 
     if (userdata.l_buf.hasData(fftSize) && userdata.r_buf.hasData(fftSize)) {
+      cout << "Has Data" << endl;
       for (int i = 0; i < fftSize; i++) {
         float l, r;
 
+        userdata.l_buf.pull(l);
+        userdata.r_buf.pull(r);
         l_time[i] = cF{l, 0};
         r_time[i] = cF{r, 0};
+      }
+      for (int i = fftSize; i < 2 * fftSize; i++) {
+        l_time[i] = cF{0, 0};
+        r_time[i] = cF{0, 0};
       }
     } else {
       cout << "Not enough data" << endl;
@@ -216,7 +237,9 @@ int main() {
 
     for (int i = 0; i < 256; i += 1) {
 
-      float height = log10(l_freq[2 * i] + l_freq[2 * i + 1] + 1) * scale;
+      int index = i + start_index;
+      float height = log10(l_freq[index] + 1) * scale;
+
       rect.h = height;
 
       rect.x = i * 2 + 44;
@@ -245,16 +268,22 @@ int main() {
       // SDL_SetRenderDrawColor(rend, 0xFF, 0, 0, 0x7F);
       SDL_RenderFillRect(rend, &rect);
 
-      height = log10(r_freq[2 * i] + r_freq[2 * i + 1] + 1) * scale;
+      height = log10(r_freq[index] + 1) * scale;
       rect.h = height;
 
-      rect.x = i * 2 + 44;
       rect.y = 450 - (rect.h) / 2;
 
       // SDL_SetRenderDrawColor(rend, 0, 0xFF, 0, 0x7F);
       SDL_RenderFillRect(rend, &rect);
     }
     SDL_RenderPresent(rend);
+    current_time = SDL_GetTicks();
+    float delta_time = current_time - previous_time;
+
+    if (delta_time < 1 / (FRAME_RATE / 1000)) {
+      SDL_Delay((1000.0f / FRAME_RATE) - delta_time);
+    }
+    previous_time = current_time;
   }
 
   SDL_Quit();
