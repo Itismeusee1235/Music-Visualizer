@@ -1,86 +1,22 @@
-#include "WavReader.hpp"
 #include "fft.hpp"
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_audio.h>
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <pulse/error.h>
+#include <pulse/simple.h>
 
-float const FRAME_RATE = 60;
+using namespace std;
 
-struct buf {
-  float *data;
-  int front;
-  int back;
-  int size;
-  int count;
+const int FRAME_RATE = 60;
+const int SAMPLE_RATE = 48000;
+const int CHANNELS = 2;
+const int BUFFER_FRAMES = 1024; // Number of frames per read
+const int BUFFER_SIZE = BUFFER_FRAMES * CHANNELS;
 
-  buf(int n) {
-    size = n;
-    data = new float[n];
-    front = 0;
-    back = 0;
-    count = 0;
-  };
+pa_simple *paStream = nullptr;
 
-  ~buf() { delete[] data; };
-
-  void put(float value) {
-    data[back] = value;
-    back = (back + 1) % size;
-    if (size == count) {
-      front = (front + 1) % size;
-    } else {
-      count++;
-    }
-  };
-
-  int pull(float &value) {
-    if (count <= 0) {
-      return -1;
-    }
-    value = data[front];
-    front = (front + 1) % size;
-    count--;
-    return 0;
-  };
-
-  void getRecent(int n) {
-
-    if (front >= n) {
-      front -= n;
-    } else {
-      front = (size - (n - front));
-    }
-    count += n;
-  };
-
-  void printFront() { cout << front << endl; };
-
-  bool hasData(int n) {
-    if (n <= count) {
-      return true;
-    }
-    return false;
-  };
-};
-
-struct udata {
-  float *l_data;
-  float *r_data;
-  buf l_buf;
-  buf r_buf;
-  int index;
-  int totalFrames;
-
-  udata(int n, int buf_size, int s) : l_buf(buf_size), r_buf(buf_size) {
-    totalFrames = n;
-    index = 0;
-    l_data = new float[s];
-    r_data = new float[s];
-  };
-  ~udata() {
-    delete[] l_data;
-    delete[] r_data;
-  }
-};
+const char *monitor_source_name = "bluez_output.B7_01_B7_EE_19_CF.1.monitor";
 
 void SetColor(SDL_Renderer *rend, int i) {
 
@@ -104,31 +40,6 @@ void SetColor(SDL_Renderer *rend, int i) {
   }
 
   SDL_SetRenderDrawColor(rend, r, g, b, 0xff);
-}
-
-void callback(void *userdata, Uint8 *stream, int len) {
-  udata *info = (udata *)userdata;
-  int num_frames = (len / sizeof(float)) / 2; // assuming 2 channels
-  float *buf = (float *)stream;
-
-  if (num_frames + info->index > info->totalFrames) {
-    for (int i = 0; i < num_frames; i++) {
-      buf[2 * i] = 0;
-      buf[2 * i + 1] = 0;
-      info->l_buf.put(0);
-      info->r_buf.put(0);
-    }
-  } else {
-    for (int i = 0; i < num_frames; i++) {
-      float l = info->l_data[info->index];
-      float r = info->r_data[info->index];
-      buf[2 * i] = l;
-      buf[2 * i + 1] = r;
-      info->index++;
-      info->l_buf.put(l);
-      info->r_buf.put(r);
-    }
-  }
 }
 
 void makeBins(int size, int num, int *bins) {
@@ -216,17 +127,57 @@ void applyHamming(float *hamming, cF *values, int N) {
     values[i] *= hamming[i];
   }
 }
+int openPulseAudio() {
+  int error;
+  pa_sample_spec ss;
+  ss.format = PA_SAMPLE_S32LE; // 32-bit signed little endian (adjust if needed)
+  ss.rate = SAMPLE_RATE;
+  ss.channels = CHANNELS;
+
+  paStream = pa_simple_new(nullptr, "PulseAudioCapture", PA_STREAM_RECORD,
+                           monitor_source_name, "record", &ss, nullptr, nullptr,
+                           &error);
+
+  if (!paStream) {
+    cerr << "pa_simple_new() failed: " << pa_strerror(error) << endl;
+    return 1;
+  }
+  return 0;
+}
+
+void closePulseAudio() {
+  if (paStream) {
+    pa_simple_free(paStream);
+    paStream = nullptr;
+  }
+}
+
+bool getAudioData(float *buffer, size_t frames) {
+  int error;
+  int32_t int_buf[frames * CHANNELS];
+  size_t bytes = frames * CHANNELS * sizeof(int32_t);
+  if (pa_simple_read(paStream, int_buf, bytes, &error) < 0) {
+    cerr << "pa_simple_read() failed: " << pa_strerror(error) << endl;
+    return false;
+  }
+
+  for (int i = 0; i < frames * CHANNELS; i++) {
+    buffer[i] = int_buf[i] / 2147483648.0f;
+  }
+
+  return true;
+}
 
 int main() {
 
-  Wav wav("output.wav");
-  WavHeader head = wav.getHeader();
-
-  int fftSize = 1024;
+  if (openPulseAudio() != 0) {
+    cerr << "Failed to open PulseAudio stream" << endl;
+    return -1;
+  }
+  int fftSize = 256;
   int numBins = 32;
 
-  udata userdata(wav.getFrames(), 2 * fftSize, 1024);
-
+  float *buffer = new float[fftSize * 2];
   float *l_freq = new float[fftSize * 2];
   float *r_freq = new float[fftSize * 2];
   float *hamming = new float[fftSize * 2];
@@ -238,27 +189,9 @@ int main() {
   for (int i = 0; i < numBins; i++) {
   }
 
-  wav.getData(userdata.l_data, userdata.r_data);
-
   if (SDL_Init(SDL_INIT_EVERYTHING)) {
     printf("Error , %s", SDL_GetError());
     return -1;
-  }
-
-  SDL_AudioSpec wanted, have;
-  SDL_AudioDeviceID device = NULL;
-  SDL_memset(&wanted, 0, sizeof(wanted));
-
-  wanted.format = AUDIO_F32SYS;
-  wanted.samples = 2048;
-  wanted.channels = head.numChannels;
-  wanted.freq = head.sampleRate;
-  wanted.callback = callback;
-  wanted.userdata = &userdata;
-
-  device = SDL_OpenAudioDevice(nullptr, 0, &wanted, NULL, 0);
-  if (device == 0) {
-    printf("Failed to open device");
   }
 
   SDL_Window *win;
@@ -266,8 +199,6 @@ int main() {
   win = SDL_CreateWindow("Music", SDL_WINDOWPOS_UNDEFINED,
                          SDL_WINDOWPOS_UNDEFINED, 600, 600, 0);
   rend = SDL_CreateRenderer(win, -1, 0);
-
-  SDL_PauseAudioDevice(device, 0);
 
   bool quit = false;
   bool on = true;
@@ -294,16 +225,8 @@ int main() {
       } else if (ev.type == SDL_KEYDOWN) {
         if (ev.key.keysym.sym == SDLK_q) {
           quit = true;
-        } else if (ev.key.keysym.sym == SDLK_SPACE) {
-
-          if (on) {
-            SDL_PauseAudioDevice(device, 1);
-            on = false;
-          } else {
-            on = true;
-            SDL_PauseAudioDevice(device, 0);
-          }
-        } else if (ev.key.keysym.sym == SDLK_UP) {
+        }
+        if (ev.key.keysym.sym == SDLK_UP) {
           scale += 1;
         } else if (ev.key.keysym.sym == SDLK_DOWN) {
           scale -= 1;
@@ -322,21 +245,18 @@ int main() {
     SDL_SetRenderDrawColor(rend, 0x0, 0x0, 0x0, 0xff);
     SDL_RenderClear(rend);
 
-    if (userdata.l_buf.hasData(fftSize) && userdata.r_buf.hasData(fftSize)) {
-      for (int i = 0; i < fftSize; i++) {
-        float l, r;
+    getAudioData(buffer, fftSize);
 
-        userdata.l_buf.pull(l);
-        userdata.r_buf.pull(r);
-        l_time[i] = cF{l, 0};
-        r_time[i] = cF{r, 0};
-      }
-      for (int i = fftSize; i < 2 * fftSize; i++) {
-        l_time[i] = cF{0, 0};
-        r_time[i] = cF{0, 0};
-      }
-    } else {
-      // NOTE:  Reuse old data
+    for (int i = 0; i < fftSize; i++) {
+      float l, r;
+      l = buffer[2 * i];
+      r = buffer[2 * i + 1];
+      l_time[i] = cF{l, 0};
+      r_time[i] = cF{r, 0};
+    }
+    for (int i = fftSize; i < 2 * fftSize; i++) {
+      l_time[i] = cF{0, 0};
+      r_time[i] = cF{0, 0};
     }
     applyHamming(hamming, l_time, 2 * fftSize);
     applyHamming(hamming, r_time, 2 * fftSize);
@@ -352,13 +272,13 @@ int main() {
 
     float delta_time = current_time - previous_time;
 
-    if (delta_time < 1 / (FRAME_RATE / 1000)) {
+    if (delta_time < 1000 / FRAME_RATE) {
       SDL_Delay((1000.0f / FRAME_RATE) - delta_time);
     }
     previous_time = current_time;
   }
 
   SDL_Quit();
-
+  closePulseAudio();
   return 0;
 }
